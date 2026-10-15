@@ -1,0 +1,435 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon Rush 3D</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#070817;color:white;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block}
+#hud{position:fixed;top:15px;left:0;width:100%;display:flex;justify-content:space-around;pointer-events:none;z-index:2}
+.panel{background:#10142bdc;border:1px solid #00eaff88;border-radius:12px;padding:10px 16px;text-align:center;box-shadow:0 0 15px #00d9ff33}
+.label{font-size:11px;color:#80f5ff;letter-spacing:2px}
+.value{font-size:24px;font-weight:bold;margin-top:4px}
+#overlay{position:fixed;inset:0;background:#050716c9;display:flex;justify-content:center;align-items:center;z-index:5;text-align:center;padding:20px}
+.card{max-width:430px;width:100%;background:#10142bed;border:1px solid #00eaff88;border-radius:22px;padding:28px;box-shadow:0 0 40px #00d9ff22}
+h1{font-size:clamp(32px,8vw,53px);margin:0;color:#00efff;text-shadow:0 0 20px #008cff}
+.card p{line-height:1.6;color:#d0d7f8}
+button{border:0;border-radius:12px;padding:14px 22px;background:linear-gradient(100deg,#00d9ff,#8b5cf6);color:white;font-size:17px;font-weight:bold;cursor:pointer}
+#controls{position:fixed;bottom:22px;left:0;width:100%;display:flex;justify-content:space-between;padding:0 22px;z-index:3;pointer-events:none}
+.ctrl{width:76px;height:65px;background:#10142bbd;border:1px solid #00eaffaa;color:white;font-size:30px;border-radius:16px;pointer-events:auto;touch-action:manipulation}
+#hint{position:fixed;bottom:8px;width:100%;text-align:center;font-size:11px;color:#b6c5e7;pointer-events:none}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="panel"><div class="label">SCORE</div><div class="value" id="score">0</div></div>
+  <div class="panel"><div class="label">COINS</div><div class="value" id="coins">0</div></div>
+  <div class="panel"><div class="label">BEST</div><div class="value" id="best">0</div></div>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <h1>NEON RUSH</h1>
+    <p>🏎️ Hindari rintangan, kumpulkan koin, dan taklukkan jalan neon!</p>
+    <p>💻 Laptop: tombol ← → atau A / D<br>📱 HP: gunakan tombol kiri dan kanan</p>
+    <button id="start">MULAI MAIN 🚀</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="ctrl" id="left">◀</button>
+  <button class="ctrl" id="right">▶</button>
+</div>
+<div id="hint">HINDARI RINTANGAN • AMBIL KOIN • JANGAN MENYERAH</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+
+if (!window.THREE) {
+  $("overlay").innerHTML =
+    '<div class="card"><h1>Oops!</h1><p>Grafis 3D gagal dimuat. Periksa koneksi internet lalu muat ulang halaman.</p></div>';
+  return;
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070817);
+scene.fog = new THREE.Fog(0x070817, 25, 105);
+
+const camera = new THREE.PerspectiveCamera(
+  65, innerWidth / innerHeight, 0.1, 180
+);
+camera.position.set(0, 5.4, 10.5);
+camera.lookAt(0, 0.8, -5);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.prepend(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0x9bbcff, 0x171026, 2));
+
+const light = new THREE.DirectionalLight(0xffffff, 2.2);
+light.position.set(-5, 10, 7);
+scene.add(light);
+
+const cyan = new THREE.MeshStandardMaterial({
+  color:0x00ddff, emissive:0x007dff, emissiveIntensity:2
+});
+const pink = new THREE.MeshStandardMaterial({
+  color:0xff168c, emissive:0xc90070, emissiveIntensity:1.8
+});
+const roadMat = new THREE.MeshStandardMaterial({
+  color:0x111426, roughness:0.8
+});
+const darkMat = new THREE.MeshStandardMaterial({color:0x080a17});
+const whiteMat = new THREE.MeshStandardMaterial({
+  color:0xd9ffff, emissive:0x67eaff, emissiveIntensity:0.6
+});
+
+const road = new THREE.Mesh(
+  new THREE.PlaneGeometry(10, 180), roadMat
+);
+road.rotation.x = -Math.PI/2;
+road.position.set(0, -0.08, -35);
+scene.add(road);
+
+// Neon road edges
+for (const x of [-5, 5]) {
+  const edge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.09, 0.08, 180), cyan
+  );
+  edge.position.set(x, 0, -35);
+  scene.add(edge);
+}
+
+// Lane markings that scroll toward the player
+const laneMarks = [];
+for (const x of [-1.67, 1.67]) {
+  for (let i=0; i<24; i++) {
+    const mark = new THREE.Mesh(
+      new THREE.BoxGeometry(0.045, 0.025, 2.1), whiteMat
+    );
+    mark.position.set(x, 0.015, 5-i*6);
+    scene.add(mark);
+    laneMarks.push(mark);
+  }
+}
+
+// Neon skyline
+for(let i=0;i<48;i++){
+  const side = i%2===0 ? -1 : 1;
+  const h = 3 + Math.random()*12;
+  const w = 1.1 + Math.random()*2.1;
+  const x = side*(7+Math.random()*12);
+  const z = -Math.random()*110;
+
+  const building = new THREE.Mesh(
+    new THREE.BoxGeometry(w,h,w),
+    new THREE.MeshStandardMaterial({
+      color: i%3===0?0x281442:0x111d3d,
+      emissive:i%2===0?0x101b6d:0x4c0c55,
+      emissiveIntensity:0.65
+    })
+  );
+  building.position.set(x,h/2-0.1,z);
+  scene.add(building);
+
+  for(let j=0;j<4;j++){
+    const win = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07,0.35,0.08),
+      i%2===0?cyan:pink
+    );
+    win.position.set(x-side*w*0.25,1+j*1.4,z+w/2+0.05);
+    scene.add(win);
+  }
+}
+
+// Starry sky
+const starGeo = new THREE.BufferGeometry();
+const starPos = [];
+for(let i=0;i<450;i++){
+  starPos.push(
+    (Math.random()-0.5)*100,
+    5+Math.random()*38,
+    -Math.random()*110
+  );
+}
+starGeo.setAttribute('position',
+  new THREE.Float32BufferAttribute(starPos,3));
+scene.add(new THREE.Points(starGeo,
+  new THREE.PointsMaterial({color:0x8bdfff,size:0.12})));
+
+// Build the player car
+const car = new THREE.Group();
+scene.add(car);
+car.position.set(0,0.12,3.2);
+
+const carBody = new THREE.Mesh(
+  new THREE.BoxGeometry(1.12,0.48,1.85),
+  new THREE.MeshStandardMaterial({
+    color:0x135bff,metalness:0.6,roughness:0.25,
+    emissive:0x071a8a,emissiveIntensity:0.7
+  })
+);
+carBody.position.y=0.42;
+car.add(carBody);
+
+const cabin = new THREE.Mesh(
+  new THREE.BoxGeometry(0.76,0.42,0.85),
+  new THREE.MeshStandardMaterial({
+    color:0x08152c,metalness:0.7,roughness:0.15,
+    emissive:0x002c64,emissiveIntensity:0.7
+  })
+);
+cabin.position.set(0,0.82,-0.12);
+car.add(cabin);
+
+const spoiler = new THREE.Mesh(
+  new THREE.BoxGeometry(1.25,0.09,0.18),pink
+);
+spoiler.position.set(0,0.78,0.82);
+car.add(spoiler);
+
+for(const x of [-0.38,0.38]){
+  const head = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22,0.1,0.07),whiteMat
+  );
+  head.position.set(x,0.43,-0.96);
+  car.add(head);
+
+  const tail = new THREE.Mesh(
+    new THREE.BoxGeometry(0.24,0.1,0.07),pink
+  );
+  tail.position.set(x,0.43,0.96);
+  car.add(tail);
+}
+
+for(const x of [-0.64,0.64]){
+  for(const z of [-0.55,0.58]){
+    const wheel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22,0.22,0.16,16),
+      new THREE.MeshStandardMaterial({color:0x080a12})
+    );
+    wheel.rotation.z=Math.PI/2;
+    wheel.position.set(x,0.24,z);
+    car.add(wheel);
+  }
+}
+
+const lanes = [-3.1,0,3.1];
+let lane = 1;
+let running = false;
+let ended = false;
+let score = 0;
+let coinCount = 0;
+let speed = 13;
+let spawnTimer = 0;
+let coinTimer = 0;
+let objects = [];
+let coins = [];
+
+let best = 0;
+try { best = Number(localStorage.getItem('neonRushBest')) || 0; }
+catch(e) {}
+$('best').textContent = best;
+
+function makeObstacle(x,z){
+  const group = new THREE.Group();
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(1.25,1.25,1.05),
+    new THREE.MeshStandardMaterial({
+      color:0xff285b,emissive:0x920025,
+      emissiveIntensity:1.3,metalness:0.3
+    })
+  );
+  box.position.y=0.66;
+  group.add(box);
+
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(1.29,0.15,1.08),pink
+  );
+  stripe.position.y=0.7;
+  group.add(stripe);
+  group.position.set(x,0,z);
+  scene.add(group);
+  objects.push({mesh:group});
+}
+
+function makeCoin(x,z){
+  const mesh = new THREE.Mesh(
+    new THREE.TorusGeometry(0.38,0.12,10,20),
+    new THREE.MeshStandardMaterial({
+      color:0xffd52e,emissive:0xffa000,
+      emissiveIntensity:2,metalness:0.5
+    })
+  );
+  mesh.position.set(x,1.15,z);
+  scene.add(mesh);
+  coins.push(mesh);
+}
+
+function updateHUD(){
+  $('score').textContent=Math.floor(score);
+  $('coins').textContent=coinCount;
+}
+
+function startGame(){
+  objects.forEach(o=>scene.remove(o.mesh));
+  coins.forEach(c=>scene.remove(c));
+  objects=[];
+  coins=[];
+  lane=1;
+  car.position.x=0;
+  score=0;
+  coinCount=0;
+  speed=13;
+  spawnTimer=0.5;
+  coinTimer=1;
+  ended=false;
+  running=true;
+  $('overlay').classList.add('hidden');
+  updateHUD();
+}
+
+function gameOver(){
+  running=false;
+  ended=true;
+  const finalScore=Math.floor(score);
+  if(finalScore>best){
+    best=finalScore;
+    $('best').textContent=best;
+    try{localStorage.setItem('neonRushBest',best)}catch(e){}
+  }
+  $('overlay').innerHTML=`
+    <div class="card">
+      <h1>GAME OVER</h1>
+      <p>🏁 Skor kamu: <b>${finalScore}</b></p>
+      <p>🪙 Koin terkumpul: <b>${coinCount}</b></p>
+      <p>Rekor terbaik: <b>${best}</b></p>
+      <button id="restart">MAIN LAGI 🔥</button>
+    </div>`;
+  $('overlay').classList.remove('hidden');
+  $('restart').addEventListener('click',startGame);
+}
+
+function moveLane(dir){
+  if(!running)return;
+  lane=Math.max(0,Math.min(2,lane+dir));
+}
+
+$('start').addEventListener('click',startGame);
+$('left').addEventListener('pointerdown',e=>{
+  e.preventDefault();moveLane(-1);
+});
+$('right').addEventListener('pointerdown',e=>{
+  e.preventDefault();moveLane(1);
+});
+
+window.addEventListener('keydown',e=>{
+  if(['ArrowLeft','ArrowRight','a','d','A','D'].includes(e.key))
+    e.preventDefault();
+  if(e.repeat)return;
+  if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')moveLane(-1);
+  if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')moveLane(1);
+  if((e.key==='Enter'||e.key===' ')&&!running&&!ended)startGame();
+});
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
+});
+
+let last=0;
+let elapsed=0;
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-last)/1000||0,0.04);
+  last=now;
+  elapsed+=dt;
+
+  // Gentle car animation
+  car.position.y=0.12+Math.sin(elapsed*8)*0.025;
+  car.rotation.z+=(lanes[lane]-car.position.x)*dt*3.5;
+  car.position.x+=(lanes[lane]-car.position.x)*Math.min(1,dt*9);
+
+  if(running){
+    speed=Math.min(29,13+score/100);
+    score+=dt*speed*0.8;
+    updateHUD();
+
+    laneMarks.forEach(mark=>{
+      mark.position.z+=speed*dt;
+      if(mark.position.z>7)mark.position.z-=144;
+    });
+
+    spawnTimer-=dt;
+    if(spawnTimer<=0){
+      const laneIndex=Math.floor(Math.random()*3);
+      makeObstacle(lanes[laneIndex],-65);
+      spawnTimer=Math.max(0.48,1.2-score/1200)+Math.random()*0.35;
+    }
+
+    coinTimer-=dt;
+    if(coinTimer<=0){
+      const coinLane=Math.floor(Math.random()*3);
+      for(let i=0;i<4;i++)
+        makeCoin(lanes[coinLane],-42-i*2.8);
+      coinTimer=2+Math.random()*1.4;
+    }
+
+    for(let i=objects.length-1;i>=0;i--){
+      const o=objects[i];
+      o.mesh.position.z+=speed*dt;
+      o.mesh.rotation.y+=dt*0.5;
+
+      if(Math.abs(o.mesh.position.z-car.position.z)<1.05 &&
+         Math.abs(o.mesh.position.x-car.position.x)<1.05){
+        gameOver();
+        break;
+      }
+      if(o.mesh.position.z>12){
+        scene.remove(o.mesh);
+        objects.splice(i,1);
+      }
+    }
+
+    for(let i=coins.length-1;i>=0;i--){
+      const c=coins[i];
+      c.position.z+=speed*dt;
+      c.rotation.y+=dt*4;
+
+      if(Math.abs(c.position.z-car.position.z)<1.05 &&
+         Math.abs(c.position.x-car.position.x)<1.05){
+        coinCount++;
+        score+=25;
+        scene.remove(c);
+        coins.splice(i,1);
+        updateHUD();
+      }else if(c.position.z>12){
+        scene.remove(c);
+        coins.splice(i,1);
+      }
+    }
+  }
+
+  renderer.render(scene,camera);
+}
+
+requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
